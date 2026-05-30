@@ -1,0 +1,108 @@
+services:
+  # Servicio de caché Redis
+  redis-cache:
+    image: redis:7-alpine
+    container_name: redis_cache
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory ${CACHE_SIZE:-200mb} --maxmemory-policy ${EVICTION_POLICY:-allkeys-lru}
+    networks:
+      - tarea_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # Servicio de caché proxy (intercepta consultas, implementa lógica de caché)
+  cache-proxy:
+    build: ./Servidor
+    container_name: cache_proxy
+    ports:
+      - "3000:3000"
+    environment:
+      - REDIS_URL=redis://redis-cache:6379
+      - RESPONSE_GENERATOR_URL=http://response-generator:3001
+      - METRICS_URL=http://metric-service:4000
+    depends_on:
+      redis-cache:
+        condition: service_healthy
+      response-generator:
+        condition: service_started
+    networks:
+      - tarea_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # Servicio de generador de respuestas (solo cómputo, sin caché)
+  response-generator:
+    build: ./Generador-respuestas
+    container_name: response_generator
+    ports:
+      - "3001:3001"
+    environment:
+      - METRICS_URL=http://metric-service:4000
+    volumes:
+      - ./data:/app/data:ro
+    networks:
+      - tarea_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  # Servicio de almacenamiento de métricas
+  metric-service:
+    build: ./Metricas               # <<--- CORREGIDO: ahora apunta a la carpeta correcta
+    container_name: metrics_storage
+    ports:
+      - "4000:4000"
+    environment:
+      - REDIS_URL=redis://redis-cache:6379
+    volumes:
+      - ./metrics_data:/data
+    depends_on:
+      redis-cache:
+        condition: service_healthy
+    networks:
+      - tarea_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # Generador de tráfico (simula carga)
+  traffic-generator:
+    build: ./Generador-trafico
+    container_name: traffic_generator
+    environment:
+      - CACHE_URL=http://cache-proxy:3000
+      - METRICS_URL=http://metric-service:4000
+      - TEST_DURATION=${TEST_DURATION:-60}
+      - RPS=${RPS:-10}
+      - DISTRIBUTION=${DISTRIBUTION:-zipf}
+      - TTL=${TTL:-3600}
+    depends_on:
+      cache-proxy:
+        condition: service_healthy
+      metric-service:
+        condition: service_healthy
+    networks:
+      - tarea_net
+    restart: "no"   # el generador se ejecuta una sola vez y termina
+
+networks:
+  tarea_net:
+    driver: bridge

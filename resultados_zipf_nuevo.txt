@@ -1,0 +1,83 @@
+Attaching to cache_proxy, metrics_storage, redis_cache, response_generator, traffic_generator
+redis_cache         | 1:C 29 Apr 2026 20:51:21.732 # WARNING Memory overcommit must be enabled! Without it, a background save or replication may fail under low memory condition. Being disabled, it can also cause failures without low memory condition, see https://github.com/jemalloc/jemalloc/issues/1328. To fix this issue add 'vm.overcommit_memory = 1' to /etc/sysctl.conf and then reboot or run the command 'sysctl vm.overcommit_memory=1' for this to take effect.
+redis_cache         | 1:C 29 Apr 2026 20:51:21.732 * oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
+redis_cache         | 1:C 29 Apr 2026 20:51:21.732 * Redis version=7.4.8, bits=64, commit=00000000, modified=0, pid=1, just started
+redis_cache         | 1:C 29 Apr 2026 20:51:21.732 * Configuration loaded
+redis_cache         | 1:M 29 Apr 2026 20:51:21.733 * monotonic clock: POSIX clock_gettime
+redis_cache         | 1:M 29 Apr 2026 20:51:21.733 * Running mode=standalone, port=6379.
+redis_cache         | 1:M 29 Apr 2026 20:51:21.734 * Server initialized
+redis_cache         | 1:M 29 Apr 2026 20:51:21.734 * Ready to accept connections tcp
+response_generator  | Iniciando carga de datos en memoria...
+response_generator  | Carga de datos finalizada.
+response_generator  | Zona Z1: 15639 registros calculados. Área: 10.29 km2
+response_generator  | Zona Z2: 27853 registros calculados. Área: 15.43 km2
+response_generator  | Zona Z3: 74117 registros calculados. Área: 20.57 km2
+response_generator  | Zona Z4: 21649 registros calculados. Área: 12.34 km2
+response_generator  | Zona Z5: 21345 registros calculados. Área: 20.57 km2
+response_generator  | Response Generator corriendo en el puerto 3001
+metrics_storage     | [METRICAS] Conectado a Redis
+metrics_storage     | [METRICAS] Servicio de metricas corriendo en puerto 4000
+metrics_storage     | [METRICAS] Archivo CSV: /data/metrics.csv
+metrics_storage     | [METRICAS] Cache efficiency habilitada según fórmula del PDF.
+cache_proxy         | [2026-04-29T20:51:27.700Z] [SERVIDOR] [INFO] Configuración de servicios cargada. | {"response_generator":"http://response-generator:3001","metrics_service":"http://metric-service:4000"}
+cache_proxy         | [2026-04-29T20:51:27.705Z] [SERVIDOR] [INFO] Cache Proxy corriendo en puerto 3000
+cache_proxy         | [2026-04-29T20:51:27.711Z] [SERVIDOR] [INFO] Conexión a Redis establecida correctamente. | {"host":"redis://redis-cache:6379"}
+traffic_generator   | 
+traffic_generator   | [GENERADOR] Iniciando prueba de carga:
+traffic_generator   |    Distribucion: zipf
+traffic_generator   |    Duracion: 60 segundos
+traffic_generator   |    Solicitudes por segundo: 10
+traffic_generator   |    TTL: 3600 segundos
+traffic_generator   |    Zonas: Z1, Z2, Z3, Z4, Z5
+traffic_generator   |    Consultas: q1, q2, q3, q4, q5
+traffic_generator   |    Nota: conf_min variará aleatoriamente (0.0 a 1.0) para aumentar la variedad de claves.
+traffic_generator   | 
+traffic_generator   | [GENERADOR] Progreso: 0s/60s - Solicitudes: 10
+traffic_generator   | [GENERADOR] Progreso: 5s/60s - Solicitudes: 60
+traffic_generator   | [GENERADOR] Progreso: 10s/60s - Solicitudes: 110
+traffic_generator   | [GENERADOR] Progreso: 15s/60s - Solicitudes: 160
+traffic_generator   | [GENERADOR] Progreso: 20s/60s - Solicitudes: 210
+traffic_generator   | [GENERADOR] Progreso: 25s/60s - Solicitudes: 260
+traffic_generator   | [GENERADOR] Progreso: 30s/60s - Solicitudes: 310
+traffic_generator   | [GENERADOR] Progreso: 35s/60s - Solicitudes: 360
+traffic_generator   | [GENERADOR] Progreso: 40s/60s - Solicitudes: 410
+traffic_generator   | [GENERADOR] Progreso: 45s/60s - Solicitudes: 460
+traffic_generator   | [GENERADOR] Progreso: 50s/60s - Solicitudes: 510
+traffic_generator   | [GENERADOR] Progreso: 55s/60s - Solicitudes: 560
+traffic_generator   | 
+traffic_generator   | ============================================================
+traffic_generator   | [GENERADOR] RESULTADOS FINALES - ZIPF
+traffic_generator   | ============================================================
+traffic_generator   | Metricas Globales:
+traffic_generator   |    Total Solicitudes: 1200
+traffic_generator   |    Hit Rate: 61.17%
+traffic_generator   |    Miss Rate: 38.83%
+traffic_generator   |    Throughput: 17.76 solicitudes/segundo
+traffic_generator   | 
+traffic_generator   | Eficiencia de Caché (según fórmula del PDF):
+traffic_generator   |    Cache Efficiency: -2.86 ms
+traffic_generator   |    t_cache (latencia promedio de aciertos): 14.55 ms
+traffic_generator   |    t_dh (latencia promedio de fallos): 30.29 ms
+traffic_generator   | 
+traffic_generator   | Latencia:
+traffic_generator   |    Promedio: 20.67ms
+traffic_generator   |    p50: 18ms
+traffic_generator   |    p95: 48ms
+traffic_generator   | 
+traffic_generator   | Cache:
+traffic_generator   |    Tasa de expulsión: 0.00 expulsiones/minuto
+traffic_generator   | 
+traffic_generator   | Por Tipo de Consulta:
+traffic_generator   |    Q1: 63.6% hit (164 hits / 94 misses)
+traffic_generator   |    Q2: 58.6% hit (130 hits / 92 misses)
+traffic_generator   |    Q3: 63.5% hit (160 hits / 92 misses)
+traffic_generator   |    Q4: 28.8% hit (72 hits / 178 misses)
+traffic_generator   |    Q5: 95.4% hit (208 hits / 10 misses)
+traffic_generator   | ============================================================
+traffic_generator   | 
+[Ktraffic_generator exited with code 0
+redis_cache         | 1:M 29 Apr 2026 20:56:22.009 * 100 changes in 300 seconds. Saving...
+redis_cache         | 1:M 29 Apr 2026 20:56:22.010 * Background saving started by pid 375
+redis_cache         | 375:C 29 Apr 2026 20:56:22.023 * DB saved on disk
+redis_cache         | 375:C 29 Apr 2026 20:56:22.023 * Fork CoW for RDB: current 0 MB, peak 0 MB, average 0 MB
+redis_cache         | 1:M 29 Apr 2026 20:56:22.112 * Background saving terminated with success
