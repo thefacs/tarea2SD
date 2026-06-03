@@ -80,7 +80,7 @@ async function sendRequest() {
         });
         return { success: true };
     } catch (error) {
-        console.error(`GENERADOR Error Kafka para ${query}: ${error.message}`);
+        console.error(`[GENERADOR] Error Kafka para ${query}: ${error.message}`);
         return { success: false };
     }
 }
@@ -88,7 +88,11 @@ async function sendRequest() {
 async function runLoadTest() {
     await producer.connect();
 
-    console.log(`\n[GENERADOR] Iniciando testeo  de carga ASÍNCRONA: ${DIST}`);
+    console.log(`\n[GENERADOR] Iniciando prueba de carga ASÍNCRONA:`);
+    console.log(`   Distribucion: ${DIST}`);
+    console.log(`   Duracion: ${DURATION} segundos`);
+    console.log(`   RPS (Mensajes/s): ${RPS}`);
+    console.log(`   Target Topic: ${TOPIC_PRINCIPAL}\n`);
     
     const endTime = Date.now() + DURATION * 1000;
     let requestCount = 0;
@@ -106,7 +110,7 @@ async function runLoadTest() {
 
         const elapsedTotal = (Date.now() - (endTime - DURATION * 1000)) / 1000;
         if (Math.floor(elapsedTotal / 5) > Math.floor((elapsedTotal - 1) / 5)) {
-            console.log(`[GENERADOR] Progreso: ${elapsedTotal.toFixed(0)}s/${DURATION}s - Enviados: ${requestCount}`);
+            console.log(`[GENERADOR] Progreso: ${elapsedTotal.toFixed(0)}s/${DURATION}s - Enviados a Kafka: ${requestCount}`);
         }
 
         const batchElapsed = Date.now() - batchStart;
@@ -117,7 +121,7 @@ async function runLoadTest() {
 
     await producer.disconnect();
     
-    console.log(`\n[GENERADOR] Envío finalizado. Esperando consolidación de métricas...`);
+    console.log(`\n[GENERADOR] Envío completado. Esperando un momento para la consolidación de métricas distribuidas...`);
     await new Promise(r => setTimeout(r, 5000));
 
     try {
@@ -130,20 +134,20 @@ async function runLoadTest() {
         console.log(`   Throughput: ${metrics.data.throughput} consultas/s`);
         console.log(`   Hit Rate: ${(metrics.data.hit_rate * 100).toFixed(2)}%`);
         
-        console.log(`\nResiliencia Kafka:`);
+        console.log(`\nResiliencia & Tolerancia a Fallos (Kafka):`);
         console.log(`   Retry Rate: ${metrics.data.retry_rate || 0}`);
         console.log(`   Recovery Rate: ${metrics.data.recovery_rate || 0}`);
         console.log(`   DLQ Rate: ${metrics.data.dlq_rate || 0}`);
         console.log(`   Backlog Size: ${metrics.data.backlog_size || 0}`);
         console.log(`   Recovery Time: ${metrics.data.recovery_time || 0} ms`);
 
-        console.log(`\nLatencia:`);
+        console.log(`\nLatencia de Extremo a Extremo:`);
         console.log(`   Promedio: ${metrics.data.latency.avg}ms`);
         console.log(`   p50: ${metrics.data.latency.p50}ms`);
         console.log(`   p95: ${metrics.data.latency.p95}ms`);
         console.log(`${'='.repeat(60)}\n`);
     } catch (error) {
-        console.error('[GENERADOR] Error obteniendo reporte final:', error.message);
+        console.error('[GENERADOR] Error obteniendo reporte acumulado de métricas:', error.message);
     }
 }
 

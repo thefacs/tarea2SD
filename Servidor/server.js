@@ -4,6 +4,9 @@ const { Kafka } = require('kafkajs');
 
 const KAFKA_BROKER = process.env.KAFKA_BROKER || 'kafka:9092';
 const TOPIC_PRINCIPAL = process.env.TOPIC_PRINCIPAL || 'consultas-geoespaciales';
+const TOPIC_RETRY = process.env.TOPIC_RETRY || 'consultas-geoespaciales-retry';
+const TOPIC_DLQ = process.env.TOPIC_DLQ || 'consultas-geoespaciales-dlq';
+const MAX_RETRIES = parseInt(process.env.MAX_RETRIES) || 3;
 const GROUP_ID = process.env.GROUP_ID || 'grupo-consumidores-sd';
 const RESPONSE_GEN_URL = process.env.RESPONSE_GENERATOR_URL || 'http://response-generator:3001';
 const METRICS_URL = process.env.METRICS_URL || 'http://metric-service:4000';
@@ -33,6 +36,7 @@ redisClient.on('error', (err) => log('ERROR', 'Fallo en la conexión con Redis.'
 
 const kafka = new Kafka({ clientId: 'consumidor_base', brokers: [KAFKA_BROKER] });
 const consumer = kafka.consumer({ groupId: GROUP_ID });
+const producer = kafka.producer(); // Productor listo para enviar a Retry y DLQ
 
 async function recordMetric(queryType, hit, latencyMs, zoneId) {
     try {
@@ -50,9 +54,16 @@ async function recordMetric(queryType, hit, latencyMs, zoneId) {
 // --- Procesador del Mensaje de Kafka ---
 async function handleKafkaMessage(messageValue) {
     const start = Date.now();
-    const consulta = JSON.parse(messageValue); // Contrato acordado: id, tipo_consulta, datos_consulta
-    const config = queryConfig[consulta.tipo_consulta];
+    let consulta;
+    
+    try {
+        consulta = JSON.parse(messageValue);
+    } catch (e) {
+        log('ERROR', 'Error parseando el mensaje recibido de Kafka', { raw: messageValue });
+        return;
+    }
 
+    const config = queryConfig[consulta.tipo_consulta];
     if (!config) {
         log('ERROR', `Tipo de consulta no soportado: ${consulta.tipo_consulta}`);
         return;
@@ -90,17 +101,46 @@ async function handleKafkaMessage(messageValue) {
         await recordMetric(consulta.tipo_consulta, false, latency, zoneId);
         
     } catch (err) {
-        // El bloque catch queda disponible para la lógica de reintentos de Ariel
-        log('ERROR', `Fallo al procesar consulta ${consulta.tipo_consulta} en consumidor`, { error: err.message, cacheKey });
+        // Lógica avanzada de resiliencia integrada para el catch
+        log('ERROR', `Fallo al procesar consulta ${consulta.tipo_consulta} en consumidor. Evaluando reintento...`, { error: err.message });
+        
+        // Inicializar o incrementar el contador de reintentos
+        consulta.retry_count = (consulta.retry_count || 0) + 1;
+        consulta.last_error = err.message;
+
+        try {
+            if (consulta.retry_count <= MAX_RETRIES) {
+                log('WARNING', `Enviando consulta a tópico de REINTENTO (#${consulta.retry_count})`, { id: consulta.id });
+                await producer.send({
+                    topic: TOPIC_RETRY,
+                    messages: [{ key: consulta.id, value: JSON.stringify(consulta) }]
+                });
+            } else {
+                log('CRITICAL', `Consulta superó el máximo de reintentos (${MAX_RETRIES}). Enviando a DLQ.`, { id: consulta.id });
+                await producer.send({
+                    topic: TOPIC_DLQ,
+                    messages: [{ key: consulta.id, value: JSON.stringify(consulta) }]
+                });
+            }
+        } catch (kafkaErr) {
+            log('ERROR', 'Fallo crítico al despachar métrica de resiliencia a Kafka', { error: kafkaErr.message });
+        }
     }
 }
 
 async function startServer() {
     await redisClient.connect();
     await consumer.connect();
-    await consumer.subscribe({ topic: TOPIC_PRINCIPAL, fromBeginning: true });
+    await producer.connect(); // Conectamos el productor de fallas
     
-    log('INFO', 'Configuración de servicios asíncronos cargada.', { kafka_broker: KAFKA_BROKER, topic: TOPIC_PRINCIPAL });
+    // El consumidor se suscribe tanto al principal como al de reintentos para procesar todo el flujo asíncrono
+    await consumer.subscribe({ topics: [TOPIC_PRINCIPAL, TOPIC_RETRY], fromBeginning: true });
+    
+    log('INFO', 'Configuración de servicios asíncronos cargada.', { 
+        kafka_broker: KAFKA_BROKER, 
+        topic_principal: TOPIC_PRINCIPAL,
+        topic_retry: TOPIC_RETRY 
+    });
 
     await consumer.run({
         eachMessage: async ({ message }) => {
@@ -111,6 +151,7 @@ async function startServer() {
 
 process.on('SIGINT', async () => {
     await consumer.disconnect();
+    await producer.disconnect();
     await redisClient.quit();
     process.exit(0);
 });
