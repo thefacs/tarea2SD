@@ -42,6 +42,7 @@ services:
       - "4000:4000"
     environment:
       - REDIS_URL=redis://redis-cache:6379
+      - METRICS_FILE_NAME=${METRICS_FILE_NAME:-metricas_globales.csv}
     volumes:
       - ./metrics_data:/data
     depends_on:

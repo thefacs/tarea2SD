@@ -18,15 +18,16 @@ client.on('connect', () => {
 });
 client.connect().catch(console.error);
 
-const dataDir = '/data';
-if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
+let METRICS_FILE_NAME = process.env.METRICS_FILE_NAME || 'metricas.csv';
+let FILE_PATH = `/data/${METRICS_FILE_NAME}`;
+const csvHeaders = 'timestamp,query_type,hit,latency_ms,zone,cache_key\n';
+
+if (!fs.existsSync('/data')) {
+    fs.mkdirSync('/data', { recursive: true });
 }
 
-const csvPath = path.join(dataDir, 'metrics.csv');
-const csvHeaders = 'timestamp,query_type,hit,latency_ms,zone,cache_key\n';
-if (!fs.existsSync(csvPath)) {
-    fs.writeFileSync(csvPath, csvHeaders);
+if (!fs.existsSync(FILE_PATH)) {
+    fs.writeFileSync(FILE_PATH, csvHeaders);
 }
 
 const metrics = {
@@ -41,6 +42,7 @@ const metrics = {
     totalDLQ: 0,
     failureStart: null,
     recoveryTimeMs: 0,
+    recoveryStarted: false,
     backlogSize: 0,
     totalSent: 0,
     by_zone: {
@@ -62,7 +64,7 @@ const metrics = {
 function saveToCSV(timestamp, queryType, hit, latencyMs, zone, cacheKey) {
     try {
         const line = `${timestamp},${queryType},${hit ? 1 : 0},${latencyMs},${zone || 'N/A'},${cacheKey || 'N/A'}\n`;
-        fs.appendFileSync(csvPath, line);
+        fs.appendFileSync(FILE_PATH, line);
     } catch (err) {
         console.error('[METRICAS] Error escribiendo CSV:', err.message);
     }
@@ -83,10 +85,6 @@ app.post('/metrics/record', (req, res) => {
             metrics.totalDLQ++;
         } else if (event_type === 'recovery') {
             metrics.totalRecoveries++;
-            if (metrics.failureStart) {
-                metrics.recoveryTimeMs = Date.now() - metrics.failureStart;
-                metrics.failureStart = null;
-            }
         } else if (event_type === 'sent') {
             metrics.totalSent++;
         }
@@ -112,6 +110,13 @@ app.post('/metrics/record', (req, res) => {
 
     if (metrics.hitLatencies.length > 5000) metrics.hitLatencies.shift();
     if (metrics.missLatencies.length > 5000) metrics.missLatencies.shift();
+
+    // Refinamiento Audit: Si estábamos en recuperación y el backlog llegó a cero, calculamos recovery_time
+    const currentBacklog = metrics.totalSent - (metrics.totalRequests + metrics.totalDLQ);
+    if (metrics.failureStart && currentBacklog <= 0) {
+        metrics.recoveryTimeMs = Date.now() - metrics.failureStart;
+        metrics.failureStart = null; // Ciclo de recuperación completado
+    }
 
     saveToCSV(Date.now(), query_type, hit, latency_ms, zone_id, cache_key);
     res.json({ ok: true });
@@ -227,8 +232,46 @@ app.get('/metrics', async (req, res) => {
     });
 });
 
+app.post('/metrics/setup', (req, res) => {
+    const { file_name } = req.body;
+    if (file_name) {
+        METRICS_FILE_NAME = file_name.endsWith('.csv') ? file_name : `${file_name}.csv`;
+        FILE_PATH = `/data/${METRICS_FILE_NAME}`;
+
+        if (!fs.existsSync(FILE_PATH)) {
+            fs.writeFileSync(FILE_PATH, csvHeaders);
+        }
+
+        metrics.hits = { q1: 0, q2: 0, q3: 0, q4: 0, q5: 0 };
+        metrics.misses = { q1: 0, q2: 0, q3: 0, q4: 0, q5: 0 };
+        metrics.hitLatencies = [];
+        metrics.missLatencies = [];
+        metrics.startTime = Date.now();
+        metrics.totalRequests = 0;
+        metrics.totalRetries = 0;
+        metrics.totalRecoveries = 0;
+        metrics.totalDLQ = 0;
+        metrics.failureStart = null;
+        metrics.recoveryTimeMs = 0;
+        metrics.backlogSize = 0;
+        metrics.totalSent = 0;
+
+        for (const zone of Object.keys(metrics.by_zone)) {
+            metrics.by_zone[zone] = { hits: 0, misses: 0 };
+        }
+        for (const q of Object.keys(metrics.responseTimes)) {
+            metrics.responseTimes[q] = [];
+        }
+
+        console.log(`[METRICAS] Sistema configurado para nuevo experimento: ${FILE_PATH}`);
+        res.json({ ok: true, file: FILE_PATH });
+    } else {
+        res.status(400).json({ error: 'file_name es requerido' });
+    }
+});
+
 app.get('/metrics/csv', (req, res) => {
-    res.download(csvPath, 'metrics.csv');
+    res.download(FILE_PATH, METRICS_FILE_NAME);
 });
 
 app.post('/metrics/reset', (req, res) => {
@@ -251,7 +294,7 @@ app.post('/metrics/reset', (req, res) => {
     for (const q of Object.keys(metrics.responseTimes)) {
         metrics.responseTimes[q] = [];
     }
-    fs.writeFileSync(csvPath, csvHeaders);
+    fs.writeFileSync(FILE_PATH, csvHeaders);
     console.log('[METRICAS] Métricas reiniciadas y CSV limpiado');
     res.json({ ok: true });
 });
@@ -268,7 +311,7 @@ app.get('/health', (req, res) => {
 function startServer() {
     app.listen(PORT, () => {
         console.log(`[METRICAS] Servicio de metricas corriendo en puerto ${PORT}`);
-        console.log(`[METRICAS] Archivo CSV: ${csvPath}`);
+        console.log(`[METRICAS] Archivo CSV: ${FILE_PATH}`);
         console.log(`[METRICAS] Cache efficiency habilitada según fórmula del PDF.`);
     });
 }

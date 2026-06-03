@@ -79,7 +79,6 @@ async function sendRequest() {
             ],
         });
 
-        // Notificar al servicio de métricas que se envió un mensaje para el cálculo de backlog
         try {
             axios.post(`${METRICS_URL}/metrics/record`, { event_type: 'sent' }, { timeout: 200 }).catch(() => { });
         } catch (e) { }
@@ -92,6 +91,15 @@ async function sendRequest() {
 }
 
 async function runLoadTest() {
+    // Configuración dinámica del experimento en el servicio de métricas
+    try {
+        const fileName = `experimento_${process.env.DISTRIBUTION || 'default'}.csv`;
+        await axios.post(`${METRICS_URL}/metrics/setup`, { file_name: fileName });
+        console.log(`[GENERADOR] Configurado experimento en métricas: ${fileName}`);
+    } catch (error) {
+        console.error('[GENERADOR] Error configurando experimento en métricas:', error.message);
+    }
+
     await producer.connect();
 
     console.log(`\n[GENERADOR] Iniciando prueba de carga ASÍNCRONA:`);

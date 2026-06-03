@@ -154,7 +154,12 @@ async function startServer() {
     });
 
     await consumer.run({
-        eachMessage: async ({ message }) => {
+        eachMessage: async ({ topic, message }) => {
+            // Refinamiento Audit: Si el mensaje viene de reintento, esperar un breve momento 
+            // para permitir que el backend (Response Generator) se recupere.
+            if (topic === TOPIC_RETRY) {
+                await new Promise(resolve => setTimeout(resolve, 1500));
+            }
             await handleKafkaMessage(message.value.toString());
         },
     });
