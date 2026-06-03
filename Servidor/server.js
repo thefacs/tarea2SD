@@ -11,7 +11,6 @@ const GROUP_ID = process.env.GROUP_ID || 'grupo-consumidores-sd';
 const RESPONSE_GEN_URL = process.env.RESPONSE_GENERATOR_URL || 'http://response-generator:3001';
 const METRICS_URL = process.env.METRICS_URL || 'http://metric-service:4000';
 
-// --- Mapeos de Claves de Caché heredados de la T1 ---
 const queryConfig = {
     'q1': { buildKey: (q) => `count:${q.zone_id}:conf=${q.conf_min || 0.0}`, getZoneId: (q) => q.zone_id },
     'q2': { buildKey: (q) => `area:${q.zone_id}:conf=${q.conf_min || 0.0}`, getZoneId: (q) => q.zone_id },
@@ -21,22 +20,21 @@ const queryConfig = {
 };
 
 function log(level, message, meta = {}) {
-    if ((level === 'DEBUG' || level === 'INFO') &&
-        !(message.includes('corriendo') || message.includes('cargada') || message.includes('establecida') || message.includes('Kafka'))) {
-        return;
-    }
     const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] [SERVIDOR] [${level}] ${message} ${Object.keys(meta).length > 0 ? '| ' + JSON.stringify(meta) : ''}`);
+    let logMsg = `[${timestamp}] [SERVIDOR] [${level}] ${message}`;
+    if (Object.keys(meta).length > 0) {
+        logMsg += ` | ${JSON.stringify(meta)}`;
+    }
+    console.log(logMsg);
 }
 
-// --- Clientes de Infraestructura ---
 const redisClient = redis.createClient({ url: process.env.REDIS_URL || 'redis://redis-cache:6379' });
 redisClient.on('connect', () => log('INFO', 'Conexión a Redis establecida correctamente.'));
 redisClient.on('error', (err) => log('ERROR', 'Fallo en la conexión con Redis.', { error: err.message }));
 
 const kafka = new Kafka({ clientId: 'consumidor_base', brokers: [KAFKA_BROKER] });
 const consumer = kafka.consumer({ groupId: GROUP_ID });
-const producer = kafka.producer(); // Productor listo para enviar a Retry y DLQ
+const producer = kafka.producer();
 
 async function recordMetric(queryType, hit, latencyMs, zoneId) {
     try {
@@ -61,7 +59,6 @@ async function recordResilienceMetric(eventType) {
     }
 }
 
-// --- Procesador del Mensaje de Kafka ---
 async function handleKafkaMessage(messageValue) {
     const start = Date.now();
     let consulta;
@@ -84,43 +81,40 @@ async function handleKafkaMessage(messageValue) {
     const zoneId = config.getZoneId(queryParams);
 
     try {
-        // 1. Verificar en caché
         const cached = await redisClient.get(cacheKey);
         if (cached !== null) {
             const latency = Date.now() - start;
             await recordMetric(consulta.tipo_consulta, true, latency, zoneId);
             log('INFO', `CACHE HIT para ${consulta.tipo_consulta}`, { cacheKey, latency_ms: latency });
+            if (consulta.retry_count > 0) {
+                log('INFO', `RECOVERY detectada para consulta ${consulta.id}`, { attempts: consulta.retry_count });
+                await recordResilienceMetric('recovery');
+            }
             return;
         }
 
         log('INFO', `CACHE MISS para ${consulta.tipo_consulta}`, { cacheKey });
 
-        // 2. Llamar al generador de respuestas
         const response = await axios.get(`${RESPONSE_GEN_URL}/query/${consulta.tipo_consulta}`, {
             params: queryParams,
             timeout: 5000
         });
         const result = response.data;
 
-        // 3. Almacenar en caché con TTL
         const ttl = parseInt(queryParams.ttl) || 3600;
         await redisClient.set(cacheKey, JSON.stringify(result), { EX: ttl });
 
-        // 4. Registrar miss exitoso
         const latency = Date.now() - start;
         await recordMetric(consulta.tipo_consulta, false, latency, zoneId);
 
-        // Si venía de un reintento y ahora tuvo éxito, es una recuperación
         if (consulta.retry_count > 0) {
             log('INFO', `RECOVERY detectada para consulta ${consulta.id}`, { attempts: consulta.retry_count });
             await recordResilienceMetric('recovery');
         }
 
     } catch (err) {
-        // Lógica avanzada de resiliencia integrada para el catch
         log('ERROR', `Fallo al procesar consulta ${consulta.tipo_consulta} en consumidor. Evaluando reintento...`, { error: err.message });
 
-        // Inicializar o incrementar el contador de reintentos
         consulta.retry_count = (consulta.retry_count || 0) + 1;
         consulta.last_error = err.message;
 
@@ -149,9 +143,8 @@ async function handleKafkaMessage(messageValue) {
 async function startServer() {
     await redisClient.connect();
     await consumer.connect();
-    await producer.connect(); // Conectamos el productor de fallas
+    await producer.connect();
 
-    // El consumidor se suscribe tanto al principal como al de reintentos para procesar todo el flujo asíncrono
     await consumer.subscribe({ topics: [TOPIC_PRINCIPAL, TOPIC_RETRY], fromBeginning: true });
 
     log('INFO', 'Configuración de servicios asíncronos cargada.', {
