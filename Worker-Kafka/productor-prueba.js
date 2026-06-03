@@ -1,6 +1,5 @@
 const { Kafka } = require('kafkajs');
 
-// Nos conectamos al Kafka que acabas de levantar en Docker
 const kafka = new Kafka({ 
     clientId: 'tester', 
     brokers: ['localhost:9092'] 
@@ -12,7 +11,6 @@ async function run() {
     console.log("=========================================");
     console.log("Productor de Prueba Conectado.");
     
-    // Este es el JSON con el formato exacto que acordaste con Felipe
     const mensajeFalso = {
         id: "msg-prueba-123",
         timestamp_creacion: Date.now(),
@@ -26,7 +24,6 @@ async function run() {
 
     console.log(`Enviando mensaje con ID: ${mensajeFalso.id}...`);
 
-    // Inyectamos el mensaje en el tópico principal
     await producer.send({
         topic: 'consultas-geoespaciales',
         messages: [{ value: JSON.stringify(mensajeFalso) }]
