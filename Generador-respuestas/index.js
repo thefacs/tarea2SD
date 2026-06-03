@@ -5,7 +5,31 @@ const csv = require('csv-parser');
 const app = express();
 const PORT = 3001;
 
-// Zonas (BBox)
+const FAILURE_RATE = parseFloat(process.env.FAILURE_RATE || 0.0);
+const ARTIFICIAL_DELAY_MS = parseInt(process.env.ARTIFICIAL_DELAY_MS || 0);
+
+console.log(`[CONFIG] Simulación de Fallas: Rate=${FAILURE_RATE}, Delay=${ARTIFICIAL_DELAY_MS}ms`);
+
+app.use((req, res, next) => {
+    if (req.path === '/health') return next();
+
+    if (ARTIFICIAL_DELAY_MS > 0) {
+        return setTimeout(() => {
+            handleFailure(req, res, next);
+        }, ARTIFICIAL_DELAY_MS);
+    }
+
+    handleFailure(req, res, next);
+});
+
+function handleFailure(req, res, next) {
+    if (Math.random() < FAILURE_RATE) {
+        console.log(`[SIMULACION] Inyectando error 500 en ${req.path}`);
+        return res.status(500).json({ error: "Error simulado por sobrecarga" });
+    }
+    next();
+}
+
 const ZONES = {
     'Z1': { id: 'Z1', lat_min: -33.445, lat_max: -33.420, lon_min: -70.640, lon_max: -70.600 },
     'Z2': { id: 'Z2', lat_min: -33.420, lat_max: -33.390, lon_min: -70.600, lon_max: -70.550 },
@@ -14,16 +38,14 @@ const ZONES = {
     'Z5': { id: 'Z5', lat_min: -33.470, lat_max: -33.430, lon_min: -70.810, lon_max: -70.760 }
 };
 
-// Área de cada zona en km² aproximada
 const ZONE_AREA_KM2 = {};
 for (const [id, z] of Object.entries(ZONES)) {
     const dLat = (z.lat_max - z.lat_min) * 111.0;
-    const dLon = (z.lon_max - z.lon_min) * 92.67; // approx cos(33.4) * 111
+    const dLon = (z.lon_max - z.lon_min) * 92.67;
     ZONE_AREA_KM2[id] = dLat * dLon;
 }
 
-// Estructura en memoria
-// data["Z1"] = [{ lat, lon, area, confidence }, ...]
+
 const data = {
     'Z1': [],
     'Z2': [],
@@ -32,7 +54,6 @@ const data = {
     'Z5': []
 };
 
-// Identifica si un punto está dentro de un bbox
 function getZoneId(lat, lon) {
     for (const z of Object.values(ZONES)) {
         if (lat >= z.lat_min && lat <= z.lat_max && lon >= z.lon_min && lon <= z.lon_max) {
@@ -42,7 +63,6 @@ function getZoneId(lat, lon) {
     return null;
 }
 
-// Cargar dataset en memoria
 function loadData() {
     console.log("Iniciando carga de datos en memoria...");
     return new Promise((resolve, reject) => {
@@ -72,7 +92,6 @@ function loadData() {
     });
 }
 
-// Funciones Q1-Q5
 
 function q1_count(zone_id, confidence_min = 0.0) {
     const records = data[zone_id] || [];
@@ -99,7 +118,7 @@ function q2_area(zone_id, confidence_min = 0.0) {
 function q3_density(zone_id, confidence_min = 0.0) {
     const count = q1_count(zone_id, confidence_min);
     const area = ZONE_AREA_KM2[zone_id] || 1;
-    return count / area; // density per km2
+    return count / area;
 }
 
 function q4_compare(zone_a, zone_b, confidence_min = 0.0) {
@@ -117,7 +136,6 @@ function q5_confidence_dist(zone_id, bins = 5) {
     const validScores = records.map(r => r.confidence);
     const bucketSize = 1.0 / bins;
 
-    // Inicializar buckets (0 a 1)
     const distribution = Array.from({ length: bins }, (_, i) => ({
         bucket: i,
         min: i * bucketSize,
@@ -127,20 +145,18 @@ function q5_confidence_dist(zone_id, bins = 5) {
 
     for (const conf of validScores) {
         let b = Math.floor(conf / bucketSize);
-        if (b >= bins) b = bins - 1; // Para aquellos con conf = 1.0
+        if (b >= bins) b = bins - 1;
         distribution[b].count++;
     }
     return distribution;
 }
 
-// Rutas Express (app.use y demás)
 app.use(express.json());
 
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', service: 'response-generator' });
 });
 
-// Q1: Conteo
 app.get('/query/q1', (req, res) => {
     const zone_id = req.query.zone_id;
     const conf_min = parseFloat(req.query.conf_min || 0.0);
@@ -148,7 +164,6 @@ app.get('/query/q1', (req, res) => {
     res.json({ count: result });
 });
 
-// Q2: Área
 app.get('/query/q2', (req, res) => {
     const zone_id = req.query.zone_id;
     const conf_min = parseFloat(req.query.conf_min || 0.0);
@@ -156,7 +171,6 @@ app.get('/query/q2', (req, res) => {
     res.json(result);
 });
 
-// Q3: Densidad
 app.get('/query/q3', (req, res) => {
     const zone_id = req.query.zone_id;
     const conf_min = parseFloat(req.query.conf_min || 0.0);
@@ -164,7 +178,6 @@ app.get('/query/q3', (req, res) => {
     res.json({ density: result });
 });
 
-// Q4: Comparación
 app.get('/query/q4', (req, res) => {
     const z1 = req.query.z1;
     const z2 = req.query.z2;
@@ -173,7 +186,6 @@ app.get('/query/q4', (req, res) => {
     res.json(result);
 });
 
-// Q5: Histograma
 app.get('/query/q5', (req, res) => {
     const zone_id = req.query.zone_id;
     const bins = parseInt(req.query.bins || 5);

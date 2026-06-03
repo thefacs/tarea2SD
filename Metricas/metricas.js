@@ -36,6 +36,13 @@ const metrics = {
     missLatencies: [],  // tiempos de fallos
     startTime: Date.now(),
     totalRequests: 0,
+    totalRetries: 0,
+    totalRecoveries: 0,
+    totalDLQ: 0,
+    failureStart: null,
+    recoveryTimeMs: 0,
+    backlogSize: 0,
+    totalSent: 0,
     by_zone: {
         Z1: { hits: 0, misses: 0 },
         Z2: { hits: 0, misses: 0 },
@@ -62,7 +69,29 @@ function saveToCSV(timestamp, queryType, hit, latencyMs, zone, cacheKey) {
 }
 
 app.post('/metrics/record', (req, res) => {
-    const { query_type, hit, latency_ms, zone_id, cache_key } = req.body;
+    const { query_type, hit, latency_ms, zone_id, cache_key, event_type, backlog_size } = req.body;
+
+    if (backlog_size !== undefined) {
+        metrics.backlogSize = backlog_size;
+    }
+
+    if (event_type) {
+        if (event_type === 'retry') {
+            metrics.totalRetries++;
+            if (!metrics.failureStart) metrics.failureStart = Date.now();
+        } else if (event_type === 'dlq') {
+            metrics.totalDLQ++;
+        } else if (event_type === 'recovery') {
+            metrics.totalRecoveries++;
+            if (metrics.failureStart) {
+                metrics.recoveryTimeMs = Date.now() - metrics.failureStart;
+                metrics.failureStart = null;
+            }
+        } else if (event_type === 'sent') {
+            metrics.totalSent++;
+        }
+        return res.json({ ok: true });
+    }
 
     if (hit) {
         metrics.hits[query_type]++;
@@ -93,22 +122,18 @@ app.get('/metrics', async (req, res) => {
     const totalMisses = Object.values(metrics.misses).reduce((a, b) => a + b, 0);
     const total = totalHits + totalMisses;
 
-    // t_cache: latencia promedio de hits
     const t_cache = metrics.hitLatencies.length > 0
         ? metrics.hitLatencies.reduce((a, b) => a + b, 0) / metrics.hitLatencies.length
         : 0;
 
-    // t_dh: latencia promedio de misses (disk/real hit)
     const t_dh = metrics.missLatencies.length > 0
         ? metrics.missLatencies.reduce((a, b) => a + b, 0) / metrics.missLatencies.length
         : 0;
 
-    // Fórmula de eficiencia del PDF
     const efficiency = total > 0
         ? ((totalHits * t_cache) - (totalMisses * t_dh)) / total
         : 0;
 
-    // Percentiles globales
     const allLatencies = [...metrics.hitLatencies, ...metrics.missLatencies];
     const sorted = [...allLatencies].sort((a, b) => a - b);
     const p50 = sorted[Math.floor(sorted.length * 0.5)] || 0;
@@ -118,7 +143,6 @@ app.get('/metrics', async (req, res) => {
         ? allLatencies.reduce((a, b) => a + b, 0) / allLatencies.length
         : 0;
 
-    // Latencias por consulta
     const latencyByQuery = {};
     for (const [q, times] of Object.entries(metrics.responseTimes)) {
         if (times.length > 0) {
@@ -134,7 +158,6 @@ app.get('/metrics', async (req, res) => {
         }
     }
 
-    // Estadísticas de Redis
     let evictionRate = 0;
     let totalKeys = 0;
     let usedMemory = 0;
@@ -175,6 +198,11 @@ app.get('/metrics', async (req, res) => {
         total_requests: total,
         total_hits: totalHits,
         total_misses: totalMisses,
+        retry_rate: metrics.totalRetries,
+        recovery_rate: metrics.totalRecoveries,
+        dlq_rate: metrics.totalDLQ,
+        backlog_size: Math.max(0, metrics.totalSent - (metrics.totalRequests + metrics.totalDLQ)),
+        recovery_time: metrics.recoveryTimeMs,
         elapsed_seconds: elapsedSeconds.toFixed(2),
         latency: {
             avg: avgLatency.toFixed(2),
@@ -210,6 +238,12 @@ app.post('/metrics/reset', (req, res) => {
     metrics.missLatencies = [];
     metrics.startTime = Date.now();
     metrics.totalRequests = 0;
+    metrics.totalRetries = 0;
+    metrics.totalRecoveries = 0;
+    metrics.totalDLQ = 0;
+    metrics.failureStart = null;
+    metrics.recoveryTimeMs = 0;
+    metrics.backlogSize = 0;
 
     for (const zone of Object.keys(metrics.by_zone)) {
         metrics.by_zone[zone] = { hits: 0, misses: 0 };

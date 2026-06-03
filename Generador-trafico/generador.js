@@ -78,6 +78,12 @@ async function sendRequest() {
                 { value: JSON.stringify(jsonMensaje) }
             ],
         });
+
+        // Notificar al servicio de métricas que se envió un mensaje para el cálculo de backlog
+        try {
+            axios.post(`${METRICS_URL}/metrics/record`, { event_type: 'sent' }, { timeout: 200 }).catch(() => { });
+        } catch (e) { }
+
         return { success: true };
     } catch (error) {
         console.error(`[GENERADOR] Error Kafka para ${query}: ${error.message}`);
@@ -93,14 +99,14 @@ async function runLoadTest() {
     console.log(`   Duracion: ${DURATION} segundos`);
     console.log(`   RPS (Mensajes/s): ${RPS}`);
     console.log(`   Target Topic: ${TOPIC_PRINCIPAL}\n`);
-    
+
     const endTime = Date.now() + DURATION * 1000;
     let requestCount = 0;
 
     while (Date.now() < endTime) {
         const batchStart = Date.now();
         const promises = [];
-        
+
         for (let i = 0; i < RPS; i++) {
             promises.push(sendRequest().then(res => {
                 if (res.success) requestCount++;
@@ -120,7 +126,7 @@ async function runLoadTest() {
     }
 
     await producer.disconnect();
-    
+
     console.log(`\n[GENERADOR] Envío completado. Esperando un momento para la consolidación de métricas distribuidas...`);
     await new Promise(r => setTimeout(r, 5000));
 
@@ -133,7 +139,7 @@ async function runLoadTest() {
         console.log(`   Total Solicitudes: ${metrics.data.total_requests}`);
         console.log(`   Throughput: ${metrics.data.throughput} consultas/s`);
         console.log(`   Hit Rate: ${(metrics.data.hit_rate * 100).toFixed(2)}%`);
-        
+
         console.log(`\nResiliencia & Tolerancia a Fallos (Kafka):`);
         console.log(`   Retry Rate: ${metrics.data.retry_rate || 0}`);
         console.log(`   Recovery Rate: ${metrics.data.recovery_rate || 0}`);

@@ -51,11 +51,21 @@ async function recordMetric(queryType, hit, latencyMs, zoneId) {
     }
 }
 
+async function recordResilienceMetric(eventType) {
+    try {
+        await axios.post(`${METRICS_URL}/metrics/record`, {
+            event_type: eventType
+        }, { timeout: 500 });
+    } catch (err) {
+        log('WARNING', `No se pudo registrar métrica de resiliencia: ${eventType}`, { error: err.message });
+    }
+}
+
 // --- Procesador del Mensaje de Kafka ---
 async function handleKafkaMessage(messageValue) {
     const start = Date.now();
     let consulta;
-    
+
     try {
         consulta = JSON.parse(messageValue);
     } catch (e) {
@@ -99,11 +109,17 @@ async function handleKafkaMessage(messageValue) {
         // 4. Registrar miss exitoso
         const latency = Date.now() - start;
         await recordMetric(consulta.tipo_consulta, false, latency, zoneId);
-        
+
+        // Si venía de un reintento y ahora tuvo éxito, es una recuperación
+        if (consulta.retry_count > 0) {
+            log('INFO', `RECOVERY detectada para consulta ${consulta.id}`, { attempts: consulta.retry_count });
+            await recordResilienceMetric('recovery');
+        }
+
     } catch (err) {
         // Lógica avanzada de resiliencia integrada para el catch
         log('ERROR', `Fallo al procesar consulta ${consulta.tipo_consulta} en consumidor. Evaluando reintento...`, { error: err.message });
-        
+
         // Inicializar o incrementar el contador de reintentos
         consulta.retry_count = (consulta.retry_count || 0) + 1;
         consulta.last_error = err.message;
@@ -115,12 +131,14 @@ async function handleKafkaMessage(messageValue) {
                     topic: TOPIC_RETRY,
                     messages: [{ key: consulta.id, value: JSON.stringify(consulta) }]
                 });
+                await recordResilienceMetric('retry');
             } else {
                 log('CRITICAL', `Consulta superó el máximo de reintentos (${MAX_RETRIES}). Enviando a DLQ.`, { id: consulta.id });
                 await producer.send({
                     topic: TOPIC_DLQ,
                     messages: [{ key: consulta.id, value: JSON.stringify(consulta) }]
                 });
+                await recordResilienceMetric('dlq');
             }
         } catch (kafkaErr) {
             log('ERROR', 'Fallo crítico al despachar métrica de resiliencia a Kafka', { error: kafkaErr.message });
@@ -132,14 +150,14 @@ async function startServer() {
     await redisClient.connect();
     await consumer.connect();
     await producer.connect(); // Conectamos el productor de fallas
-    
+
     // El consumidor se suscribe tanto al principal como al de reintentos para procesar todo el flujo asíncrono
     await consumer.subscribe({ topics: [TOPIC_PRINCIPAL, TOPIC_RETRY], fromBeginning: true });
-    
-    log('INFO', 'Configuración de servicios asíncronos cargada.', { 
-        kafka_broker: KAFKA_BROKER, 
+
+    log('INFO', 'Configuración de servicios asíncronos cargada.', {
+        kafka_broker: KAFKA_BROKER,
         topic_principal: TOPIC_PRINCIPAL,
-        topic_retry: TOPIC_RETRY 
+        topic_retry: TOPIC_RETRY
     });
 
     await consumer.run({
