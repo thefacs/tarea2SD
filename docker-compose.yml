@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Servicio de caché Redis
   redis-cache:
@@ -79,10 +77,12 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_LOG_RETENTION_HOURS: 168
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true" 
+      # Esta variable le dice al script de Confluent que use KRaft y autoconfigure el almacenamiento
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
     networks:
       - tarea_net
     healthcheck:
-      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      test: ["CMD", "kafka-cluster", "cluster-id", "--bootstrap-server", "localhost:9092"]
       interval: 10s
       timeout: 5s
       retries: 5
