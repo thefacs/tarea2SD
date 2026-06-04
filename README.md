@@ -97,6 +97,25 @@ docker-compose --profile manual run --rm -e DISTRIBUTION=uniform generador-trafi
 
 ---
 
+### Escenario 6 (Spike de tráfico)
+
+```bash
+export METRICS_FILE_NAME=escenario6.csv
+docker-compose down -v --remove-orphans
+docker volume prune -f
+
+docker-compose up -d --scale consumidor-base=3
+
+sleep 15
+
+docker-compose --profile manual run --rm -e DISTRIBUTION=uniform -e RPS=20 generador-trafico
+
+
+
+---
+
+
+
 ## Resultados principales
 
 - El escalamiento horizontal de workers reduce la latencia del sistema.
@@ -114,16 +133,6 @@ docker-compose --profile manual run --rm -e DISTRIBUTION=uniform generador-trafi
 - Redis reduce significativamente la carga del backend.
 - El sistema es resiliente frente a fallas parciales del sistema.
 - El rendimiento depende fuertemente del nivel de concurrencia de workers.
-
----
-
-## Mejoras futuras
-
-- Implementar cache warming para mejorar hit rate inicial.
-- Ajustar estrategias de particionado en Kafka.
-- Incorporar TTL dinámico en Redis.
-- Optimizar balanceo de carga entre consumidores.
-- Agregar observabilidad más granular (tracing distribuido).
 
 ---
 
