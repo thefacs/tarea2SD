@@ -109,10 +109,8 @@ docker-compose up -d --scale consumidor-base=3
 sleep 15
 
 docker-compose --profile manual run --rm -e DISTRIBUTION=uniform -e RPS=20 generador-trafico
+```
 
-
-
----
 
 
 ---
