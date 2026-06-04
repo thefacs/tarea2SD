@@ -234,8 +234,11 @@ app.get('/metrics', async (req, res) => {
 
 app.post('/metrics/setup', (req, res) => {
     const { file_name } = req.body;
-    if (file_name) {
-        METRICS_FILE_NAME = file_name.endsWith('.csv') ? file_name : `${file_name}.csv`;
+    
+    let finalFileName = process.env.METRICS_FILE_NAME || file_name || 'metricas.csv';
+    
+    if (finalFileName) {
+        METRICS_FILE_NAME = finalFileName.endsWith('.csv') ? finalFileName : `${finalFileName}.csv`;
         FILE_PATH = `/data/${METRICS_FILE_NAME}`;
 
         if (!fs.existsSync(FILE_PATH)) {

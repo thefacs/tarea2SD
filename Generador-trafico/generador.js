@@ -102,6 +102,17 @@ async function runLoadTest() {
 
     await producer.connect();
 
+    // Warm-up: Asegurar que el tópico existe para evitar errores de metadatos iniciales
+    try {
+        await producer.send({
+            topic: TOPIC_PRINCIPAL,
+            messages: [{ value: 'WARMUP' }]
+        });
+        console.log(`[GENERADOR] Tópico ${TOPIC_PRINCIPAL} verificado/creado.`);
+    } catch (e) {
+        console.log(`[GENERADOR] Aviso: Error en warmup de tópico (puede ignorarse si Kafka se está estabilizando): ${e.message}`);
+    }
+
     console.log(`\n[GENERADOR] Iniciando prueba de carga ASÍNCRONA:`);
     console.log(`   Distribucion: ${DIST}`);
     console.log(`   Duracion: ${DURATION} segundos`);

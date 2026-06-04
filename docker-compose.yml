@@ -87,10 +87,12 @@ services:
       timeout: 5s
       retries: 5
 
-  # Generador de tráfico como productor con Kafka 
+  # Generador de tráfico como productor con Kafka (Aislado mediante Perfil)
   generador-trafico:
     build: ./Generador-trafico
     container_name: traffic_generator
+    profiles:
+      - manual
     environment:
       - KAFKA_BROKER=kafka:9092
       - TOPIC_PRINCIPAL=consultas-geoespaciales
@@ -107,17 +109,15 @@ services:
       - tarea_net
     restart: "no"
 
-  # Consumidores Kafka con soporte para Resiliencia (Tópicos de reintento y DLQ)
+  # Consumidores Kafka con soporte para Resiliencia
   consumidor-base:
     build: ./Servidor
-    container_name: consumidor_base
     environment:
       - KAFKA_BROKER=kafka:9092
       - TOPIC_PRINCIPAL=consultas-geoespaciales
-      # Añadimos los tópicos que usará la lógica de Ariel:
       - TOPIC_RETRY=consultas-geoespaciales-retry
       - TOPIC_DLQ=consultas-geoespaciales-dlq
-      - MAX_RETRIES=3
+      - MAX_RETRIES=2
       - GROUP_ID=grupo-consumidores-sd
       - REDIS_URL=redis://redis-cache:6379
       - RESPONSE_GENERATOR_URL=http://response-generator:3001
