@@ -40,7 +40,6 @@ Dentro de esta carpeta debe incluirse el dataset con el siguiente nombre:
 ├── Generador-trafico/
 ├── Metricas/
 ├── metrics_data/
-├── qa_test.sh
 ├── Servidor/
 └── Worker-Kafka/
 ```
