@@ -59,8 +59,8 @@ docker volume prune -f
 
 ```bash
 export METRICS_FILE_NAME=escenario2.csv
-docker-compose up -d
-docker-compose --profile manual run --rm -e DISTRIBUTION=uniform generador-trafico
+docker compose up -d
+docker compose --profile manual run --rm -e DISTRIBUTION=uniform generador-trafico
 ```
 
 ---
@@ -69,9 +69,9 @@ docker-compose --profile manual run --rm -e DISTRIBUTION=uniform generador-trafi
 
 ```bash
 export METRICS_FILE_NAME=escenario3.csv
-docker-compose up -d --scale consumidor-base=3
-sleep 20
-docker-compose --profile manual run --rm -e DISTRIBUTION=uniform generador-trafico
+docker compose up -d --scale consumidor-base=3
+docker exec redis_cache redis-cli flushall
+docker compose --profile manual run --rm -e DISTRIBUTION=uniform generador-trafico
 ```
 
 ---
@@ -80,8 +80,12 @@ docker-compose --profile manual run --rm -e DISTRIBUTION=uniform generador-trafi
 
 ```bash
 export METRICS_FILE_NAME=escenario4.csv
-docker-compose up -d --scale consumidor-base=3
-docker-compose --profile manual run --rm -e DISTRIBUTION=uniform generador-trafico
+docker compose down -v
+docker compose up -d --scale consumidor-base=3
+docker exec redis_cache redis-cli flushall
+docker stop response_generator
+(sleep 3 && docker start response_generator) &
+docker compose --profile manual run --rm -e DISTRIBUTION=uniform generador-trafico
 ```
 
 ---
@@ -90,28 +94,18 @@ docker-compose --profile manual run --rm -e DISTRIBUTION=uniform generador-trafi
 
 ```bash
 export METRICS_FILE_NAME=escenario5.csv
-docker-compose down -v --remove-orphans
-docker-compose up -d --scale consumidor-base=3
-docker-compose --profile manual run --rm -e DISTRIBUTION=uniform generador-trafico
+docker exec redis_cache redis-cli flushall
+docker stop response_generator
+docker compose --profile manual run --rm -e DISTRIBUTION=uniform generador-trafico
 ```
 
----
-
-### Escenario 6 (Spike de tráfico)
+### Escenario 6 (Spike de trafico)
 
 ```bash
 export METRICS_FILE_NAME=escenario6.csv
-docker-compose down -v --remove-orphans
-docker volume prune -f
-
-docker-compose up -d --scale consumidor-base=3
-
-sleep 15
-
-docker-compose --profile manual run --rm -e DISTRIBUTION=uniform -e RPS=20 generador-trafico
+docker exec redis_cache redis-cli flushall
+docker compose --profile manual run --rm -e DISTRIBUTION=zipf generador-trafico & docker compose --profile manual run --rm -e DISTRIBUTION=uniform generador-trafico
 ```
-
-
 
 ---
 
